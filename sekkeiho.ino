@@ -2,12 +2,9 @@
 #include <Adafruit_PWMServoDriver.h>
 #include <QTRSensors.h>   //QTRセンサを使用するのに必要
 
-
-//  called this way,  it uses the default address 0x40
 Adafruit_PWMServoDriver pwm =  Adafruit_PWMServoDriver();
 #define SERVO_FREQ 50 //  Analog servos run at ~50 Hz updates
 #define NUM_SENSORS 8
-
 
 // pin
 const int rmpin = 3;
@@ -24,19 +21,19 @@ const int leftMinSpeed = 267;
 const int rightstopspeed = 312;
 const int leftstopspeed = 311;
 
-const int top = 102;
-const int bottom = 491;
-
 // gain
 const double distgain = 110;
 const double radgain = 30;
-const double lpf = 0.9;
-
+const double lpf = 0.2;
 
 QTRSensors qtr;                      // センサを使用するためのオブジェクトの生成
 const uint8_t SensorCount = 8;       // 使用するセンサの数
 const int middlevalue = 500;
 uint16_t sensorValues[SensorCount];  // 各センサの値を格納するための変数
+
+int rightdist, leftdist;
+int pastrightdist = 0;
+int pastleftdist = 0;
 
 //制御ゲイン
 double Kp = 0.28;
@@ -58,6 +55,9 @@ double omgL0 = leftMaxSpeed;
 double position;
 double pastposition = ref;
 
+enum Direct{RIGHT, LEFT};
+enum Position{TOP, BOTTOM, MIDDLE};
+int armpos[3];
 
 void setup() {
   Serial.begin(115200);
@@ -68,16 +68,24 @@ void setup() {
 
   pinMode(rpsdpin, INPUT);
   pinMode(lpsdpin, INPUT);
+  pinMode(10, OUTPUT);
+  pinMode(11, OUTPUT);
+
   pinMode(LED_BUILTIN, OUTPUT);
 
   Serial.println("Calibrating line sensor ...");
   qtr.setTypeRC();
   qtr.setSensorPins((const uint8_t[]){2, 3, 4, 5, 6, 7, 8, 9}, SensorCount);
 
+  armpos[TOP] = 447;
+  armpos[BOTTOM] = 225;
+  armpos[MIDDLE] = (447+225)/2;
+
+  setArm(MIDDLE);
 
   delay(100);
   digitalWrite(LED_BUILTIN, HIGH);
-  for (uint16_t i = 0; i < 150; i++){
+  for (uint16_t i = 0; i < 100; i++){
     qtr.calibrate();
   }
   // キャリブレーション中を知らせるためのLEDを消灯
@@ -105,29 +113,6 @@ void setServoPulse(uint8_t n,  double pulse) {
 int state = 0;
 int32_t timer;
 void loop() {
-  /* while(1){ */
-  /*   int diff = analogRead(0)-analogRead(1); */
-  /*   diff *= 0.4; */
-  /*   if(diff > 0) rightRotation(diff); */
-  /*   else leftRotation(diff); */
-  /* } */
-  /* while(1){ */
-  /*   leftRotation(100); */
-  /*   if(analogRead(0) >= 300 && analogRead(1) <= 200){ */
-  /*     break; */
-  /*   } */
-  /* } */
-  /* leftRotation(100, 10); */
-  /* brake(); */
-  /* delay(500); */
-  /* while(1){ */
-  /*   forward(100); */
-  /*   /1* if(max(analogRead(0), analogRead(1) >= 600)) break; *1/ */
-  /* } */
-  /* brake(); */
-  /* while(1); */
-
-
   switch(state){
     case 0:
       linetrace();
@@ -223,6 +208,27 @@ void loop() {
   }
 }
 
+void getBall(Direct d){
+  backward(100, 5);
+  while(1){
+    getpsd();
+    if(d == RIGHT){
+      if(leftdist  >= 380) break;
+      rightRotation(100);
+    }
+    if(d == LEFT){
+      if(rightdist >= 380) break;
+      leftRotation(100);
+    }
+  }
+  backward(100, 9);
+  brake(1000);
+  setArm(BOTTOM);
+  delay(1000);
+  forward(100, 4);
+  brake();
+}
+
 void rightturn(int speed){
   rightRotation(speed);
   while(onLine()) delay(10);
@@ -241,10 +247,25 @@ void leftturn(int speed){
   while(sensorValues[4] > middlevalue) delay(10);
 }
 
+void setArm(Position p){
+  pwm.setPWM(4, 0, armpos[p]);
+}
+
+void getpsd(){
+  rightdist = analogRead(0);
+  leftdist = analogRead(1);
+
+  rightdist = rightdist*lpf+pastrightdist*(1-lpf);
+  leftdist = leftdist*lpf+pastleftdist*(1-lpf);
+
+  pastrightdist = rightdist;
+  pastleftdist = leftdist;
+}
 void showpsd(){
-  Serial.print(analogRead(0));
-  Serial.print("\t");
-  Serial.print(analogRead(1));
+  getpsd();
+  Serial.print(rightdist);
+  Serial.print(",");
+  Serial.print(leftdist);
   Serial.print("\n");
 }
 void debug(){
