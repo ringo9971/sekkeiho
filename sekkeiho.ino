@@ -15,7 +15,7 @@ const int lpsdpin = A1;
 
 // motor speed
 const int rightMaxSpeed = 267;
-const int rightMinSpeed = 348;
+const int rightMinSpeed = 347;
 const int leftMaxSpeed = 348;
 const int leftMinSpeed = 267;
 const int rightstopspeed = 312;
@@ -36,8 +36,8 @@ int pastrightdist = 0;
 int pastleftdist = 0;
 
 //制御ゲイン
-double Kp = 0.28;
-double Kd = 0.15;
+double Kp = 0.29;
+double Kd = 0.18;
 
 //制御偏差（目標値と現在の値との差）
 double err = 0;
@@ -81,11 +81,11 @@ void setup() {
   armpos[BOTTOM] = 225;
   armpos[MIDDLE] = (447+225)/2;
 
-  setArm(MIDDLE);
+  setArm(TOP);
 
   delay(100);
   digitalWrite(LED_BUILTIN, HIGH);
-  for (uint16_t i = 0; i < 100; i++){
+  for (uint16_t i = 0; i < 150; i++){
     qtr.calibrate();
   }
   // キャリブレーション中を知らせるためのLEDを消灯
@@ -117,7 +117,7 @@ void loop() {
     case 0:
       linetrace();
       if(sensorValues[0] > middlevalue){
-        forward(255, 15);
+        forward(255, 15); // ひとつ目のカーブ
         leftturn(255);
         state++;
       }
@@ -127,22 +127,25 @@ void loop() {
       if(sensorValues[NUM_SENSORS-1] > middlevalue) state++;
       break;
     case 2:
-      forward(255, 15); // フタツメカーブ
+      forward(255, 15); // ふたつ目のカーブ
       rightturn(255);
       state++;
       timer = millis();
       break;
     case 3:
-      if(millis()-timer >= 2000) state++;
+      if(sensorValues[0] >= middlevalue){// 奥まで行く
+        getBall(LEFT); // 左のボールを取る
+        state++;
+      }
       linetrace();
       break;
     case 4:
-      leftturn(255);
+      leftturn(255); // 復帰
       state++;
       break;
     case 5:
       linetrace();
-      if(sensorValues[0] > middlevalue){
+      if(sensorValues[0] > middlevalue){// ふたつ目のカーブ
         forward(255, 15);
         rightturn(255);
         state++;
@@ -150,33 +153,38 @@ void loop() {
       break;
     case 6: 
       linetrace();
-      if(sensorValues[0] > middlevalue){
+      if(sensorValues[0] > middlevalue){// シュートライン
         rightturn(255);
         backward(255, 5);
-        brake(2000); // イッカイメノシュート  
+        brake(); // 一回目のシュート
+        long hoge = millis();
+        while(millis()-hoge <= 15000) openFinger();
+        stopFinger();
         state = 100;
       }
       break;
     case 100:
       linetrace();
-      if(sensorValues[0] > middlevalue){
+      if(sensorValues[0] > middlevalue){// ふたつ目のカーブ
         forward(255, 15);
         leftturn(255);
         state++;
       }
-      timer = millis();
       break;
     case 101:
-      if(millis()-timer >= 2000) state++;
       linetrace();
+      if(sensorValues[0] >= middlevalue){// 奥まで行く
+        getBall(RIGHT); // 右のボールを取る
+        state++;
+      }
       break;
     case 102:
-      rightturn(255);
+      rightturn(255); // 復帰
       state++;
       break;
     case 103:
       linetrace();
-      if(sensorValues[0] > middlevalue){
+      if(sensorValues[0] > middlevalue){// ふたつ目のカーブ
         forward(255, 15);
         rightturn(255);
         state++;
@@ -184,67 +192,88 @@ void loop() {
       break;
     case 104:
       linetrace();
-      if(sensorValues[0] > middlevalue){
+      if(sensorValues[0] > middlevalue){// シュートライン
         rightturn(255);
         backward(255, 5);
-        brake(2000); // 二回目のシュート
+        brake(); // 二回目のシュート
+        long hoge = millis();
+        while(millis()-hoge <= 15000) openFinger();
+        stopFinger();
         state = 200;
       }
       break;
 
     case 200:
       linetrace();
-      if(sensorValues[NUM_SENSORS-1] > middlevalue){
+      if(sensorValues[NUM_SENSORS-1] > middlevalue){// ひとつ目のカーブ
         forward(255, 15);
         rightturn(255);
         rightturn(255);
-        forward(255, 20);
         state++;
       }
       break;
-
+    case 201:
+      if(!onLine()){
+        forward(100, 10);
+        brake();
+        state++;
+      }
+      linetrace();
+      break;
     default:
       brake();
   }
 }
 
 void getBall(Direct d){
-  backward(100, 5);
+  backward(100, 7);
   while(1){
     getpsd();
     if(d == RIGHT){
-      if(leftdist  >= 380) break;
+      if(leftdist  >= 600) break;
       rightRotation(100);
     }
     if(d == LEFT){
-      if(rightdist >= 380) break;
+      if(leftdist >= 600) break;
       leftRotation(100);
     }
   }
-  backward(100, 9);
-  brake(1000);
+
+  int cnt = 0;
+  while(cnt++ < 1500){
+    getpsd();
+    int diff = leftdist-rightdist;
+    diff *= 0.1;
+    if(diff > 0) leftRotation(diff);
+    else rightRotation(diff);
+  }
+  brake();
+
+  backward(100, 10);
+  brake(500);
   setArm(BOTTOM);
   delay(1000);
-  forward(100, 4);
+  forward(100, 6);
   brake();
+  delay(1000);
+  long timer = millis();
+  while(millis()-timer <= 15000) closeFinger();
+  stopFinger();
+
+  setArm(TOP);
 }
 
-void rightturn(int speed){
-  rightRotation(speed);
-  while(onLine()) delay(10);
-  delay(10);
-  while(!onLine()) delay(10);
-  delay(100);
-  while(sensorValues[3] > middlevalue) delay(10);
+void openFinger(){
+  digitalWrite(10, HIGH);
+  digitalWrite(11, LOW);
 }
-
-void leftturn(int speed){
-  leftRotation(speed);
-  while(onLine()) delay(10);
-  delay(10);
-  while(!onLine()) delay(10);
-  delay(100);
-  while(sensorValues[4] > middlevalue) delay(10);
+void closeFinger(){
+  digitalWrite(10, LOW);
+  digitalWrite(11, HIGH);
+}
+void stopFinger(){
+  digitalWrite(10, LOW);
+  digitalWrite(11, LOW);
 }
 
 void setArm(Position p){
@@ -285,6 +314,24 @@ bool onLine(){
     if(sensorValues[i] > middlevalue) return true;
   }
   return false;
+}
+
+void rightturn(int speed){
+  rightRotation(speed);
+  while(onLine()) delay(10);
+  delay(10);
+  while(!onLine()) delay(10);
+  delay(100);
+  while(sensorValues[3] > middlevalue) delay(10);
+}
+
+void leftturn(int speed){
+  leftRotation(speed);
+  while(onLine()) delay(10);
+  delay(10);
+  while(!onLine()) delay(10);
+  delay(100);
+  while(sensorValues[4] > middlevalue) delay(10);
 }
 
 void linetrace(){
