@@ -202,8 +202,13 @@ void loop() {
         state = 200;
       }
       break;
-
     case 200:
+      linetrace();
+      if(sensorValues[0] >= middlevalue){
+        forward(255, 5);
+        state++;
+      }
+    case 201:
       linetrace();
       if(sensorValues[NUM_SENSORS-1] > middlevalue){// ひとつ目のカーブ
         forward(255, 15);
@@ -212,9 +217,9 @@ void loop() {
         state++;
       }
       break;
-    case 201:
+    case 202:
       if(!onLine()){
-        forward(100, 10);
+        forward(100, 13);
         brake();
         state++;
       }
