@@ -26,14 +26,15 @@ const double distgain = 110;
 const double radgain = 30;
 const double lpf = 0.2;
 
-QTRSensors qtr;                      // センサを使用するためのオブジェクトの生成
-const uint8_t SensorCount = 8;       // 使用するセンサの数
+QTRSensors qtr;                     // センサを使用するためのオブジェクトの生成
+const uint8_t SensorCount = 8;      // 使用するセンサの数
 const int middlevalue = 500;
-uint16_t sensorValues[SensorCount];  // 各センサの値を格納するための変数
+uint16_t sensorValues[SensorCount]; // 各センサの値を格納するための変数
 
-int rightdist, leftdist;
+int rightdist, leftdist, middledist;
 int pastrightdist = 0;
 int pastleftdist = 0;
+int pastmiddledist = 0;
 
 //制御ゲイン
 double Kp = 0.29;
@@ -55,13 +56,15 @@ double omgL0 = leftMaxSpeed;
 double position;
 double pastposition = ref;
 
+// ボールを取る向き
 enum Direct{RIGHT, LEFT};
+// アームの場所
 enum Position{TOP, BOTTOM, MIDDLE};
 int armpos[3];
 
 void setup() {
   Serial.begin(115200);
-  Serial.println("Sample Program : LineTracer v2");
+  Serial.println("Productioni Program");
   pwm.begin();
   pwm.setOscillatorFrequency(27000000);  //  The int.osc. is closer to 27MHz
   pwm.setPWMFreq(SERVO_FREQ);  //  Analog servos run at ~60 Hz updates
@@ -85,29 +88,18 @@ void setup() {
 
   delay(100);
   digitalWrite(LED_BUILTIN, HIGH);
-  for (uint16_t i = 0; i < 150; i++){
+  for (uint16_t i = 0; i < 175; i++){
     qtr.calibrate();
+    if(i < 10) rightRotation(60);
+    else if(i > 150) rightRotation(60);
+    else if((i/10)%6 < 3) leftRotation(60);
+    else rightRotation(60);
   }
+  brake();
   // キャリブレーション中を知らせるためのLEDを消灯
   digitalWrite(LED_BUILTIN, LOW);
   Serial.println("Calibrated line sensor.");
   delay(800);
-}
-
-//  You can use this function if you'd like to set the pulse length in seconds
-//  e.g. setServoPulse(0,  0.001) is a ~1 millisecond pulse width. It's not precise!
-void setServoPulse(uint8_t n,  double pulse) {
-  double pulselength;
-
-  pulselength = 1000000;   //  1, 000, 000 us per second
-  pulselength /= SERVO_FREQ;   //  Analog servos run at ~60 Hz updates
-  Serial.print(pulselength); Serial.println(" us per period");
-  pulselength /= 4096;  //  12 bits of resolution
-  Serial.print(pulselength); Serial.println(" us per bit");
-  pulse *= 1000000;  //  convert input seconds to us
-  pulse /= pulselength;
-  Serial.println(pulse);
-  pwm.setPWM(n, 0, pulse);
 }
 
 int state = 0;
@@ -129,15 +121,14 @@ void loop() {
     case 2:
       forward(255, 15); // ふたつ目のカーブ
       rightturn(255);
-      state++;
+
+      getBall(LEFT);
+      
+      rightturn(255);
+      backward(255, 15);
+      leftturn(255);
+      state = 6;
       timer = millis();
-      break;
-    case 3:
-      if(sensorValues[0] >= middlevalue){// 奥まで行く
-        getBall(LEFT); // 左のボールを取る
-        state++;
-      }
-      linetrace();
       break;
     case 4:
       leftturn(255); // 復帰
@@ -145,7 +136,7 @@ void loop() {
       break;
     case 5:
       linetrace();
-      if(sensorValues[0] > middlevalue){// ふたつ目のカーブ
+      if(sensorValues[0] > middlevalue){ // ふたつ目のカーブ
         forward(255, 15);
         rightturn(255);
         state++;
@@ -153,64 +144,57 @@ void loop() {
       break;
     case 6: 
       linetrace();
-      if(sensorValues[0] > middlevalue){// シュートライン
+      if(sensorValues[0] > middlevalue){ // シュートライン
         rightturn(255);
         backward(255, 5);
         brake(); // 一回目のシュート
-        long hoge = millis();
-        while(millis()-hoge <= 15000) openFinger();
+
+        openFinger();
+        delay(15000);
         stopFinger();
+
         state = 100;
       }
       break;
     case 100:
       linetrace();
-      if(sensorValues[0] > middlevalue){// ふたつ目のカーブ
+      if(sensorValues[0] > middlevalue){ // ふたつ目のカーブ
         forward(255, 15);
         leftturn(255);
-        state++;
-      }
-      break;
-    case 101:
-      linetrace();
-      if(sensorValues[0] >= middlevalue){// 奥まで行く
-        getBall(RIGHT); // 右のボールを取る
-        state++;
-      }
-      break;
-    case 102:
-      rightturn(255); // 復帰
-      state++;
-      break;
-    case 103:
-      linetrace();
-      if(sensorValues[0] > middlevalue){// ふたつ目のカーブ
-        forward(255, 15);
-        rightturn(255);
-        state++;
+
+        getBall(RIGHT);
+        
+        leftturn(255);
+        backward(255, 10);
+        leftturn(255);
+
+        state = 104;
       }
       break;
     case 104:
       linetrace();
-      if(sensorValues[0] > middlevalue){// シュートライン
+      if(sensorValues[0] > middlevalue){ // シュートライン
         rightturn(255);
         backward(255, 5);
         brake(); // 二回目のシュート
-        long hoge = millis();
-        while(millis()-hoge <= 15000) openFinger();
+
+        openFinger();
+        delay(15000);
         stopFinger();
+
         state = 200;
       }
       break;
     case 200:
       linetrace();
-      if(sensorValues[0] >= middlevalue){
+      if(sensorValues[0] >= middlevalue){ // 左の道は無視する
         forward(255, 5);
         state++;
       }
+      break;
     case 201:
       linetrace();
-      if(sensorValues[NUM_SENSORS-1] > middlevalue){// ひとつ目のカーブ
+      if(sensorValues[NUM_SENSORS-1] > middlevalue){ // ひとつ目のカーブ
         forward(255, 15);
         rightturn(255);
         rightturn(255);
@@ -231,38 +215,36 @@ void loop() {
 }
 
 void getBall(Direct d){
-  backward(100, 7);
+  brake();
+  setArm(BOTTOM);
+  delay(500);
+  forward(255, 8);
+  brake();
+
   while(1){
     getpsd();
     if(d == RIGHT){
-      if(leftdist  >= 600) break;
-      rightRotation(100);
+      if(middledist  >= 350){
+        break;
+      }
+      rightRotation(50);
     }
     if(d == LEFT){
-      if(leftdist >= 600) break;
-      leftRotation(100);
+      if(middledist >= 350){
+        leftRotation(50, 5);
+        break;
+      }
+      leftRotation(50);
     }
   }
-
-  int cnt = 0;
-  while(cnt++ < 1500){
-    getpsd();
-    int diff = leftdist-rightdist;
-    diff *= 0.1;
-    if(diff > 0) leftRotation(diff);
-    else rightRotation(diff);
-  }
   brake();
 
-  backward(100, 10);
-  brake(500);
-  setArm(BOTTOM);
-  delay(1000);
-  forward(100, 6);
+  forward(100, 10);
   brake();
   delay(1000);
-  long timer = millis();
-  while(millis()-timer <= 15000) closeFinger();
+
+  closeFinger();
+  delay(15000);
   stopFinger();
 
   setArm(TOP);
@@ -288,12 +270,15 @@ void setArm(Position p){
 void getpsd(){
   rightdist = analogRead(0);
   leftdist = analogRead(1);
+  middledist = analogRead(2);
 
   rightdist = rightdist*lpf+pastrightdist*(1-lpf);
   leftdist = leftdist*lpf+pastleftdist*(1-lpf);
+  middledist = middledist*lpf+pastmiddledist*(1-lpf);
 
   pastrightdist = rightdist;
   pastleftdist = leftdist;
+  pastmiddledist = middledist;
 }
 void showpsd(){
   getpsd();
@@ -342,7 +327,6 @@ void leftturn(int speed){
 void linetrace(){
   position = qtr.readLineBlack(sensorValues);
   err = ref-position;
-  u_in = Kp*err+Kd*(position-pastposition);
   u_in = Kp*err+Kd*(position-pastposition);
   double omgR = omgR0 + u_in;
   double omgL = omgL0 - u_in;
@@ -404,3 +388,20 @@ void brake(){
   pwm.setPWM(rmpin, 0, rightstopspeed);
   pwm.setPWM(lmpin, 0, leftstopspeed);
 }
+
+//  You can use this function if you'd like to set the pulse length in seconds
+//  e.g. setServoPulse(0,  0.001) is a ~1 millisecond pulse width. It's not precise!
+void setServoPulse(uint8_t n,  double pulse) {
+  double pulselength;
+
+  pulselength = 1000000;   //  1, 000, 000 us per second
+  pulselength /= SERVO_FREQ;   //  Analog servos run at ~60 Hz updates
+  Serial.print(pulselength); Serial.println(" us per period");
+  pulselength /= 4096;  //  12 bits of resolution
+  Serial.print(pulselength); Serial.println(" us per bit");
+  pulse *= 1000000;  //  convert input seconds to us
+  pulse /= pulselength;
+  Serial.println(pulse);
+  pwm.setPWM(n, 0, pulse);
+}
+
